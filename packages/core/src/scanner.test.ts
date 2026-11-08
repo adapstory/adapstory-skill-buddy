@@ -11,6 +11,7 @@ import {
   discoverOmpSupplementalRoots,
   discoverPiSupplementalRoots,
   scanInstalledSkills,
+  scanInstalledSkillsWithWarnings,
   type SkillRoot,
 } from './scanner.js'
 
@@ -734,6 +735,79 @@ describe('supplemental skill roots', () => {
 })
 
 describe('scanInstalledSkills', () => {
+  it.skipIf(process.getuid?.() === 0)('retains an installation and reports an unreadable resource directory', async () => {
+    const home = await tempHome()
+    const root = join(home, 'skills')
+    const skill = join(root, 'with-resources')
+    const blocked = join(skill, 'blocked')
+    await fs.mkdir(blocked, { recursive: true })
+    await fs.writeFile(join(skill, 'SKILL.md'), '---\nname: with-resources\n---\n')
+    await fs.writeFile(join(skill, 'available.txt'), 'available')
+    await fs.chmod(blocked, 0)
+    try {
+      const roots: SkillRoot[] = [
+        { agent: 'custom-agent', scope: 'user', path: root, origin: 'user', readOnly: false },
+      ]
+      const result = await scanInstalledSkillsWithWarnings([], roots)
+      expect(result.skills).toEqual([expect.objectContaining({
+        path: skill,
+        skill: expect.objectContaining({
+          name: 'with-resources', resources: { 'available.txt': join(skill, 'available.txt') },
+        }),
+      })])
+      expect(result.errors).toContainEqual(expect.objectContaining({
+        path: blocked, operation: 'read-installation', code: 'EACCES',
+      }))
+    } finally {
+      await fs.chmod(blocked, 0o700)
+    }
+  })
+
+  it('reports missing roots, broken links and unreadable skill files without losing healthy installations', async () => {
+    const home = await tempHome()
+    const root = join(home, 'skills')
+    const missing = join(home, 'missing')
+    await fs.mkdir(join(root, 'healthy'), { recursive: true })
+    await fs.writeFile(join(root, 'healthy', 'SKILL.md'), '---\nname: healthy\n---\n')
+    await fs.mkdir(join(root, 'unreadable', 'SKILL.md'), { recursive: true })
+    await fs.symlink(join(home, 'missing-target'), join(root, 'broken'))
+    const roots: SkillRoot[] = [root, missing].map((path) => ({
+      agent: 'custom-agent', scope: 'user', path, origin: 'user', readOnly: false,
+    }))
+
+    const result = await scanInstalledSkillsWithWarnings([], roots)
+    expect(result.skills.map((item) => item.skill.name)).toEqual(['healthy'])
+    expect(result.warnings).toEqual([])
+    expect(result.errors).toEqual(expect.arrayContaining([
+      expect.objectContaining({ path: missing, operation: 'read-root', code: 'ENOENT' }),
+      expect.objectContaining({ path: join(root, 'broken'), operation: 'read-link', code: 'ENOENT' }),
+      expect.objectContaining({ path: join(root, 'unreadable', 'SKILL.md'), operation: 'read-installation', code: 'EISDIR' }),
+    ]))
+  })
+
+  it('reports parked link failures while retaining disabled broken entries', async () => {
+    const home = await tempHome()
+    const root = join(home, 'skills')
+    const blocked = join(home, 'blocked')
+    const parking = join(root, '.skillbuddy', 'disabled')
+    await fs.mkdir(parking, { recursive: true })
+    await fs.symlink(join(home, 'missing-target'), join(parking, 'broken'))
+    await fs.mkdir(join(blocked, '.skillbuddy'), { recursive: true })
+    await fs.writeFile(join(blocked, '.skillbuddy', 'disabled'), '')
+    const roots: SkillRoot[] = [root, blocked].map((path) => ({
+      agent: 'custom-agent', scope: 'user', path, origin: 'user', readOnly: false,
+    }))
+
+    const result = await scanInstalledSkillsWithWarnings([], roots)
+    expect(result.skills).toEqual([expect.objectContaining({
+      path: join(parking, 'broken'), enabled: false, linkBroken: true,
+    })])
+    expect(result.errors).toEqual(expect.arrayContaining([
+      expect.objectContaining({ path: join(parking, 'broken'), operation: 'read-link', code: 'ENOENT' }),
+      expect.objectContaining({ path: join(blocked, '.skillbuddy', 'disabled'), operation: 'read-link', code: 'ENOTDIR' }),
+    ]))
+  })
+
   it('保留调用方传入的未注册平台根', async () => {
     const home = await tempHome()
     const root = join(home, 'custom-skills')

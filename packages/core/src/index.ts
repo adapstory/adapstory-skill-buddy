@@ -1,4 +1,5 @@
 export * from './types.js'
+export { resolveSkillProvenance } from './provenance.js'
 export * from './platforms.js'
 export * from './platform-residue.js'
 export * from './adapters/index.js'
@@ -21,6 +22,7 @@ export {
   type SkillFileState,
   SKILL_FILE_NAME,
   DISABLED_SKILL_FILE_NAME,
+  updateSkillDocument,
 } from './skill-io.js'
 export {
   disabledLinksDir,

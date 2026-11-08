@@ -6,6 +6,7 @@ import { promises as fs } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { basename, dirname, join, relative, resolve } from 'node:path'
 import { promisify } from 'node:util'
+import { pathToFileURL } from 'node:url'
 import {
   aggregateSkills,
   allAdapters,
@@ -15,6 +16,7 @@ import {
   listSkillRoots,
   readSkillFile,
   registerPlatform,
+  resolveSkillProvenance,
   scanInstalledSkills,
   scanInstalledSkillsWithWarnings,
   SKILL_FILE_NAME,
@@ -32,6 +34,7 @@ import { assertRemovableResidue, PathAccessPolicy, validateCustomPlatform } from
 import { derivePlatformDraft, discoverPlatformCandidates } from '../platform-discovery'
 import { setWindowChromeTheme, setWindowVibrancy } from '../window'
 import { installTarget, runTargets } from './targets'
+import { getPendingGitPublication, inspectGitSource, mergeGitSource, resolveConflictPath, retryGitPublication, saveGitSkill } from '../provenance-git'
 
 const execFileAsync = promisify(execFile)
 let skillStateMutationQueue = Promise.resolve()
@@ -244,7 +247,66 @@ export function registerSkillsIpc(pathPolicy: PathAccessPolicy): void {
     return {
       skills: await aggregateSkills(result.skills),
       warnings: result.warnings,
+      errors: result.errors,
     }
+  })
+
+  async function managedGitForPath(path: unknown) {
+    if (typeof path !== 'string' || resolve(path) !== path) throw new Error('Invalid Git source request')
+    const roots = await listSkillRoots()
+    const root = roots.find((item) => !item.readOnly && !item.runtimeProjection && dirname(path) === resolve(item.path))
+    if (!root) throw new Error('Managed Git installation not found')
+    const installations = await scanInstalledSkills([], roots)
+    const installation = installations.find((item) => item.path === path && item.provenance?.kind === 'git')
+    if (installation?.provenance?.kind === 'git') return installation.provenance
+    // A conflict may temporarily remove SKILL.md. The entry must still be inside a writable
+    // platform root and resolve to a checkout independently verified by its manifest.
+    const [candidate] = await resolveSkillProvenance([{
+      agent: root.agent, scope: root.scope, path, origin: root.origin,
+      skill: { name: basename(path), description: '', content: '' },
+    }])
+    if (candidate?.provenance?.kind !== 'git') throw new Error('Managed Git installation not found')
+    return candidate.provenance
+  }
+
+  ipcMain.handle('skills:git-info', async (_event, path: unknown, fetchUpstream: unknown) => {
+    if (typeof fetchUpstream !== 'boolean') throw new Error('Invalid Git source request')
+    return inspectGitSource(await managedGitForPath(path), fetchUpstream)
+  })
+  ipcMain.handle('skills:git-merge', async (_event, path: unknown, action: unknown) => {
+    if (action !== 'merge' && action !== 'finish') throw new Error('Invalid Git source operation')
+    return mergeGitSource(await managedGitForPath(path), action)
+  })
+  ipcMain.handle('skills:git-pending', async (_event, path: unknown) => {
+    return getPendingGitPublication(await managedGitForPath(path))
+  })
+  ipcMain.handle('skills:git-retry', async (_event, path: unknown) => {
+    return retryGitPublication(await managedGitForPath(path))
+  })
+  ipcMain.handle('skills:git-save', async (_event, path: unknown, expectedCommit: unknown, edit: unknown) => {
+    if (typeof path !== 'string' || typeof expectedCommit !== 'string' || !/^[0-9a-f]{40}$/.test(expectedCommit) ||
+        typeof edit !== 'object' || edit === null || !('description' in edit) || typeof edit.description !== 'string' ||
+        !('content' in edit) || typeof edit.content !== 'string' || !('tags' in edit) || !Array.isArray(edit.tags) ||
+        !edit.tags.every((tag: unknown) => typeof tag === 'string') ||
+        ('version' in edit && edit.version !== undefined && typeof edit.version !== 'string')) {
+      throw new Error('Invalid managed skill edit')
+    }
+    const source = await managedGitForPath(path)
+    return saveGitSkill(source, join(path, SKILL_FILE_NAME), expectedCommit, {
+      description: edit.description,
+      content: edit.content,
+      tags: edit.tags,
+      version: 'version' in edit && typeof edit.version === 'string' ? edit.version : undefined,
+    })
+  })
+  ipcMain.handle('skills:git-open-conflict', async (_event, path: unknown, file: unknown) => {
+    if (typeof file !== 'string') throw new Error('Invalid conflict file')
+    const target = await resolveConflictPath(await managedGitForPath(path), file)
+    if (process.platform === 'darwin') {
+      await execFileAsync('/usr/bin/open', ['-a', 'Visual Studio Code', target])
+      return
+    }
+    return shell.openExternal(`vscode://file${pathToFileURL(target).pathname}`)
   })
 
   ipcMain.handle('platforms:list', () => listPlatformStatus())

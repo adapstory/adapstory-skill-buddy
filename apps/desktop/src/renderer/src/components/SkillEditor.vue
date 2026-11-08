@@ -8,6 +8,7 @@ import {
   ref,
   shallowRef,
   useTemplateRef,
+  watch,
 } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Maximize2, Minimize2 } from '@lucide/vue'
@@ -24,25 +25,71 @@ import { useSkills } from '@/composables/useSkills'
 const props = defineProps<{ skill: AggregatedSkill }>()
 const emit = defineEmits<{ done: [] ; cancel: [] }>()
 
-const { installSkill } = useSkills()
+const { installSkill, refresh } = useSkills()
 const { t } = useI18n()
 const MarkdownEditor = defineAsyncComponent(() => import('@/components/MarkdownEditor.vue'))
 
 const editableInstallations = editableSkillInstallations(props.skill, {})
-const source = editableInstallations[0]
-const description = ref(props.skill.description)
-const version = ref(props.skill.version ?? '')
-const tagsInput = ref(props.skill.tags.join(', '))
-const content = ref(source?.skill.content ?? '')
+const singleTarget = editableInstallations.some((item) => item.provenance?.kind === 'git')
+const selectedPath = ref(editableInstallations[0]?.path ?? '')
+const source = computed(() => editableInstallations.find((item) => item.path === selectedPath.value))
+const description = ref(source.value?.skill.description ?? props.skill.description)
+const version = ref(source.value?.skill.version ?? '')
+const tagsInput = ref((source.value?.skill.tags ?? []).join(', '))
+const content = ref(source.value?.skill.content ?? '')
 
-/** 默认写入所有可安全编辑的安装，保持各端内容同步。 */
-const targetPaths = ref<Set<string>>(new Set(editableInstallations.map((i) => i.path)))
+/** Managed Git edits target one installation and one source repository at a time. */
+const targetPaths = ref<Set<string>>(new Set(singleTarget ? [selectedPath.value] : editableInstallations.map((i) => i.path)))
 const busy = ref(false)
 const error = ref<string | null>(null)
+const pending = ref(false)
+const checkingPending = ref(false)
 const editorExpanded = shallowRef(false)
 const markdownEditor = useTemplateRef<InstanceType<typeof MarkdownEditor>>('markdownEditor')
 
 const multiInstalled = computed(() => editableInstallations.length > 1)
+
+watch(selectedPath, (path) => {
+  const item = editableInstallations.find((installation) => installation.path === path)
+  if (!item) return
+  targetPaths.value = new Set([path])
+  description.value = item.skill.description
+  version.value = item.skill.version ?? ''
+  tagsInput.value = (item.skill.tags ?? []).join(', ')
+  content.value = item.skill.content
+  void checkPending(path)
+})
+
+async function checkPending(path: string): Promise<void> {
+  const item = editableInstallations.find((installation) => installation.path === path)
+  pending.value = false
+  checkingPending.value = false
+  if (item?.provenance?.kind !== 'git') return
+  checkingPending.value = true
+  try {
+    const value = await window.skillsManager.pendingSkillPublication(path)
+    if (selectedPath.value === path) pending.value = value
+  } catch (cause) {
+    if (selectedPath.value === path) error.value = cause instanceof Error ? cause.message : String(cause)
+  } finally {
+    if (selectedPath.value === path) checkingPending.value = false
+  }
+}
+
+async function retry(): Promise<void> {
+  busy.value = true
+  error.value = null
+  try {
+    await window.skillsManager.retrySkillPublication(selectedPath.value)
+    pending.value = false
+    await refresh()
+    emit('done')
+  } catch (cause) {
+    error.value = cause instanceof Error ? cause.message : String(cause)
+  } finally {
+    busy.value = false
+  }
+}
 
 async function toggleEditorExpanded(): Promise<void> {
   editorExpanded.value = !editorExpanded.value
@@ -57,7 +104,7 @@ function onEditorKeydown(event: KeyboardEvent): void {
   void toggleEditorExpanded()
 }
 
-onMounted(() => window.addEventListener('keydown', onEditorKeydown, true))
+onMounted(() => { window.addEventListener('keydown', onEditorKeydown, true); void checkPending(selectedPath.value) })
 onBeforeUnmount(() => window.removeEventListener('keydown', onEditorKeydown, true))
 
 function toggle(path: string): void {
@@ -72,7 +119,7 @@ function toggle(path: string): void {
 }
 
 async function save(): Promise<void> {
-  if (!source) {
+  if (!source.value) {
     error.value = t('detail.parseErrorBlocked')
     return
   }
@@ -88,7 +135,18 @@ async function save(): Promise<void> {
         .map((t) => t.trim())
         .filter(Boolean),
       content: content.value,
-      resources: source.skill.resources,
+      resources: source.value.skill.resources,
+    }
+    if (source.value.provenance?.kind === 'git') {
+      await window.skillsManager.saveManagedSkill(source.value.path, source.value.provenance.commit, {
+        description: payload.description,
+        version: payload.version,
+        tags: payload.tags ?? [],
+        content: payload.content,
+      })
+      await refresh()
+      emit('done')
+      return
     }
     const targets: InstallTarget[] = editableInstallations
       .filter((i) => targetPaths.value.has(i.path))
@@ -100,6 +158,9 @@ async function save(): Promise<void> {
       return
     }
     emit('done')
+  } catch (cause) {
+    error.value = cause instanceof Error ? cause.message : String(cause)
+    if (source.value.provenance?.kind === 'git') await checkPending(source.value.path)
   } finally {
     busy.value = false
   }
@@ -108,7 +169,7 @@ async function save(): Promise<void> {
 
 <template>
   <div class="flex flex-col gap-4 px-6 py-4">
-    <div class="grid grid-cols-2 gap-3">
+    <div v-if="!pending" class="grid grid-cols-2 gap-3">
       <label class="col-span-2 flex flex-col gap-1.5 text-sm text-muted-foreground">
         {{ t('editor.description') }}
         <textarea
@@ -128,7 +189,7 @@ async function save(): Promise<void> {
       </label>
     </div>
 
-    <Teleport to="body" :disabled="!editorExpanded">
+    <Teleport v-if="!pending" to="body" :disabled="!editorExpanded">
       <div
         :class="[
           editorExpanded
@@ -163,17 +224,19 @@ async function save(): Promise<void> {
     </Teleport>
 
     <div v-if="multiInstalled" class="flex flex-col gap-2 rounded-md border px-3 py-2.5">
-      <span class="text-sm text-muted-foreground">{{ t('editor.saveTo') }}</span>
+      <span class="text-sm text-muted-foreground">{{ t(singleTarget ? 'editor.saveToSingle' : 'editor.saveTo') }}</span>
       <label
         v-for="inst in editableInstallations"
         :key="inst.path"
         class="flex cursor-pointer items-center gap-2 text-sm"
       >
         <input
-          type="checkbox"
+          :type="singleTarget ? 'radio' : 'checkbox'"
           :checked="targetPaths.has(inst.path)"
+          :name="singleTarget ? 'skill-edit-target' : undefined"
+          :disabled="busy"
           class="accent-foreground"
-          @change="toggle(inst.path)"
+          @change="singleTarget ? selectedPath = inst.path : toggle(inst.path)"
         />
         <PlatformIcon :id="inst.agent" :size="14" />
         {{ agentLabel(inst.agent) }}
@@ -182,13 +245,15 @@ async function save(): Promise<void> {
     </div>
 
     <p v-if="error" class="text-sm text-destructive">{{ error }}</p>
+    <p v-if="pending" class="text-sm">{{ t('detail.gitSourcePending') }}</p>
 
     <div class="flex items-center justify-end gap-2 pb-2">
       <Button variant="ghost" size="sm" :disabled="busy" @click="emit('cancel')">
         {{ t('common.cancel') }}
       </Button>
-      <Button size="sm" :disabled="!description.trim()" :loading="busy" @click="save">
-        {{ busy ? t('editor.saving') : t('editor.saveN', { n: targetPaths.size }) }}
+      <Button v-if="pending" size="sm" :loading="busy" @click="retry">{{ t('detail.gitSourceRetry') }}</Button>
+      <Button v-else size="sm" :disabled="checkingPending || !description.trim()" :loading="busy" @click="save">
+        {{ busy ? t('editor.saving') : source?.provenance?.kind === 'git' ? t('editor.savePublish') : t('editor.saveN', { n: targetPaths.size }) }}
       </Button>
     </div>
   </div>

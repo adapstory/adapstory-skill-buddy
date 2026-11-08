@@ -106,25 +106,35 @@ export async function removeParkedLink(skillsDir: string, name: string): Promise
 }
 
 /** List every link parked in a root's disabled area. */
-export async function listParkedLinks(skillsDir: string): Promise<ParkedLink[]> {
+export async function listParkedLinks(
+  skillsDir: string,
+  onError?: (path: string, error: unknown) => void,
+): Promise<ParkedLink[]> {
   const dir = disabledLinksDir(skillsDir)
   let entries
   try {
     entries = await fs.readdir(dir, { withFileTypes: true })
-  } catch {
+  } catch (error) {
+    if (!(error instanceof Error && 'code' in error && error.code === 'ENOENT')) onError?.(dir, error)
     return []
   }
   const parked: ParkedLink[] = []
   for (const entry of entries) {
     if (!entry.isSymbolicLink()) continue
     const path = join(dir, entry.name)
-    const target = await fs.readlink(path).catch(() => null)
+    const target = await fs.readlink(path).catch((error: unknown) => {
+      onError?.(path, error)
+      return null
+    })
     // 上游本体在停放期间可能被删除或移走，断链要保留条目并标记，
     // 否则已禁用的 Skill 会从列表里静默消失。
     const broken = await fs
       .stat(path)
       .then(() => false)
-      .catch(() => true)
+      .catch((error: unknown) => {
+        onError?.(path, error)
+        return true
+      })
     parked.push({ name: entry.name, path, target, broken })
   }
   return parked

@@ -77,6 +77,18 @@ const visibleCanEdit = computed(() =>
 const visibleHasParseError = computed(() =>
   visibleInstallations.value.some((installation) => Boolean(installation.parseError)),
 )
+const provenanceLabel = computed(() => {
+  const sources = new Set(visibleInstallations.value.map(({ provenance }) =>
+    provenance?.kind === 'git' ? JSON.stringify([provenance.kind, provenance.upstream, provenance.origin]) : provenance?.kind === 'archive' ? JSON.stringify([provenance.kind, provenance.url, provenance.archiveType]) : (provenance?.kind ?? 'unknown'),
+  ))
+  if (sources.size > 1) return t('detail.provenanceMixed')
+  const provenance = visibleInstallations.value[0]?.provenance
+  if (provenance?.kind === 'git') return `${t('detail.provenanceGit')}: ${provenance.upstream}`
+  if (provenance?.kind === 'manual') return t('detail.provenanceManual')
+  if (provenance?.kind === 'codex') return t('detail.provenanceCodex')
+  if (provenance?.kind === 'archive') return `${t('detail.provenanceArchive')}${provenance.url ? `: ${provenance.url}` : ''}`
+  return t(provenance?.kind === 'plugin' ? 'detail.provenancePlugin' : 'detail.provenanceUnknown')
+})
 const toggleLabel = computed(() => {
   if (props.scopeFilter && props.currentPlatform) {
     return t(visibleHasEnabled.value ? 'card.disableScopeAgent' : 'card.enableScopeAgent', {
@@ -221,6 +233,7 @@ const uninstallCurrentLabel = computed(() =>
       </div>
       <div class="flex min-h-5 items-center gap-2">
         <span class="flex min-w-0 flex-wrap items-center gap-1.5">
+          <Badge variant="outline">{{ provenanceLabel }}</Badge>
           <Badge v-if="readOnly" variant="secondary">
             {{ t('card.readOnly') }}
           </Badge>

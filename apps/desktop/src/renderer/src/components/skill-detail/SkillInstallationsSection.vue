@@ -87,6 +87,28 @@ function originLabel(installation: Installation): string {
     ? `${label} · ${projectName}`
     : label
 }
+
+function provenanceLabel(installation: Installation): string {
+  const provenance = installation.provenance
+  if (provenance?.kind === 'git') {
+    return `${provenance.upstream} · ${provenance.commit.slice(0, 8)}${provenance.dirty ? ` · ${t('detail.provenanceDirty')}` : ''}`
+  }
+  if (provenance?.kind === 'manual') return t('detail.provenanceManual')
+  if (provenance?.kind === 'codex') {
+    return provenance.git
+      ? `${t('detail.provenanceCodex')} · ${t('detail.provenanceLocalCommit')} ${provenance.git.commit.slice(0, 8)}${provenance.git.dirty ? ` · ${t('detail.provenanceDirty')}` : ''}`
+      : t('detail.provenanceCodex')
+  }
+  if (provenance?.kind === 'archive') return [t('detail.provenanceArchive'), provenance.url, provenance.archiveType].filter(Boolean).join(' · ')
+  return t(provenance?.kind === 'plugin' ? 'detail.provenancePlugin' : 'detail.provenanceUnknown')
+}
+
+function provenanceTitle(installation: Installation): string | undefined {
+  const provenance = installation.provenance
+  if (provenance?.kind === 'git') return `${provenance.upstream}\n${provenance.origin}\n${provenance.commit}`
+  if (provenance?.kind === 'codex' && provenance.git) return `${t('detail.provenanceLocalCommit')}\n${provenance.git.commit}\n${provenance.git.repository}`
+  return undefined
+}
 </script>
 
 <template>
@@ -109,6 +131,9 @@ function originLabel(installation: Installation): string {
             :title="installation.scope === 'project' ? installation.projectRoot : undefined"
           >
             <span class="truncate">{{ originLabel(installation) }}</span>
+          </Badge>
+          <Badge variant="outline" class="max-w-64 truncate" :title="provenanceTitle(installation)">
+            {{ provenanceLabel(installation) }}
           </Badge>
           <Badge
             variant="outline"

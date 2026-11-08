@@ -10,6 +10,7 @@ import type {
   PlatformStatus,
   Skill,
   SkillParseWarning,
+  ScanInstalledSkillsResult,
 } from '@skillbuddy/core'
 import type {
   AiConversationContext,
@@ -22,6 +23,8 @@ import type {
   FilePreviewResult,
   GitBackupRequest,
   GitBackupResult,
+  GitSourceInfo,
+  GitSourceOperationResult,
   GitInstructionRestoreRequest,
   GitInstructionRestoreResult,
   GitRestorePreview,
@@ -261,8 +264,18 @@ const api = {
     invoke('skills:scan', projectRoots),
   scanSkillsDiagnostics: (
     projectRoots: string[] = [],
-  ): Promise<{ skills: AggregatedSkill[]; warnings: SkillParseWarning[] }> =>
+  ): Promise<{ skills: AggregatedSkill[]; warnings: SkillParseWarning[]; errors: ScanInstalledSkillsResult['errors'] }> =>
     invoke('skills:scan-diagnostics', projectRoots),
+  inspectSkillGit: (path: string, fetchUpstream: boolean): Promise<GitSourceInfo> =>
+    invoke('skills:git-info', path, fetchUpstream),
+  mergeSkillGit: (path: string, action: 'merge' | 'finish'): Promise<GitSourceOperationResult> =>
+    invoke('skills:git-merge', path, action),
+  saveManagedSkill: (path: string, expectedCommit: string, edit: Pick<Skill, 'description' | 'version' | 'tags' | 'content'>): Promise<GitSourceOperationResult> =>
+    invoke('skills:git-save', path, expectedCommit, edit),
+  pendingSkillPublication: (path: string): Promise<boolean> => invoke('skills:git-pending', path),
+  retrySkillPublication: (path: string): Promise<GitSourceOperationResult> => invoke('skills:git-retry', path),
+  openSkillGitConflict: (path: string, file: string): Promise<void> =>
+    invoke('skills:git-open-conflict', path, file),
   scanInstructions: (request: InstructionScanRequest): Promise<InstructionServiceScan> =>
     invoke('instructions:scan', request),
   scanProjectInstructions: (request: InstructionScanRequest): Promise<InstructionServiceScan> =>

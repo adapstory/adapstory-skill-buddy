@@ -53,6 +53,26 @@ export type InstallScope = 'user' | 'project'
 /** How a discovered skill is managed on disk. */
 export type SkillOrigin = InstallScope | 'shared' | 'legacy' | 'admin' | 'system' | 'plugin'
 
+/** Provenance is separate from the platform location represented by SkillOrigin. */
+export type SkillProvenance =
+  | { kind: 'git'; upstream: string; origin: string; commit: string; dirty: boolean; managedPath: string; manifestPath: string; upstreamFilter?: 'anthropic-frontend-design-v1' }
+  | { kind: 'manual'; evidence: { source: 'skill-frontmatter'; field: 'skillBuddyProvenance'; confidence: 'declared' } }
+  | { kind: 'codex'; evidence: { source: 'skill-frontmatter'; field: 'skillBuddyProvenance'; confidence: 'declared' }; git?: { commit: string; dirty: boolean; repository: string } }
+  | {
+      kind: 'archive'
+      url?: string
+      archiveType?: 'zip' | 'tar' | 'tar.gz' | 'other'
+      evidence: { source: 'skill-frontmatter'; field: 'skillBuddyProvenance'; confidence: 'declared' }
+    }
+  | { kind: 'plugin' }
+  | { kind: 'unknown'; confidence: 'none' }
+
+export type DeclaredProvenanceEvidence = {
+  source: 'skill-frontmatter'
+  field: 'skillBuddyProvenance'
+  confidence: 'declared'
+}
+
 /** How a linked Skill's directory entry is owned, deciding whether it may be moved. */
 export type SkillLinkKind =
   /** 用户或上游建立的引用，链接条目归本平台目录所有，可停放启停。 */
@@ -81,6 +101,9 @@ export interface SkillRoot extends SupplementalSkillRoot {
 /** A skill discovered on disk in some agent's native location. */
 export interface InstalledSkill {
   skill: Skill
+  /** Stable identity of this platform installation, not the skill's name. */
+  installationId?: string
+  provenance?: SkillProvenance
   agent: AgentId
   scope: InstallScope
   /** Absolute path of the installed skill (file or directory). */

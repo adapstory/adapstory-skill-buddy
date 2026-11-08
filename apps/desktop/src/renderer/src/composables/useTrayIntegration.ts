@@ -49,7 +49,7 @@ export function useTrayIntegration(options: TrayIntegrationOptions = {}) {
     attentionCount: attentionCount.value,
     lastCheckedAt: lastCheckedAt.value,
     autoRefresh: autoRefresh.value,
-    locale: language.value === 'en' ? 'en' : 'zh-CN',
+    locale: language.value,
     ...(errorMessage.value ? { errorMessage: errorMessage.value } : {}),
   }))
 

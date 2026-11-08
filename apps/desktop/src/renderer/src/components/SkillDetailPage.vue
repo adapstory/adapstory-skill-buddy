@@ -19,6 +19,7 @@ import SkillDriftSection from '@/components/skill-detail/SkillDriftSection.vue'
 import SkillGroupMembershipSection from '@/components/skill-detail/SkillGroupMembershipSection.vue'
 import SkillInstallPanel from '@/components/skill-detail/SkillInstallPanel.vue'
 import SkillInstallationsSection from '@/components/skill-detail/SkillInstallationsSection.vue'
+import SkillGitSourceSection from '@/components/skill-detail/SkillGitSourceSection.vue'
 import SkillResourcesSection from '@/components/skill-detail/SkillResourcesSection.vue'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -182,6 +183,7 @@ watch(canEdit, (editable) => {
           @remove="removeInstallation"
           @toggle="toggleInstallation"
         />
+        <SkillGitSourceSection :installations="skill.installations" />
         <div
           v-if="skill.hasDrift"
           ref="driftSection"

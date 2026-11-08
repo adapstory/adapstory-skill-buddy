@@ -153,7 +153,7 @@ describe('Git backup', () => {
     })
 
     const worktree = await temporaryDirectory('skillbuddy-backup-v1-')
-    await git(undefined, ['clone', remote, worktree])
+    await git(undefined, ['clone', '--branch', 'main', remote, worktree])
     const manifestPath = join(worktree, 'skillbuddy-backup.json')
     const manifest = JSON.parse(await fs.readFile(manifestPath, 'utf8')) as Record<string, unknown>
     manifest.version = 1
@@ -258,7 +258,7 @@ describe('Git backup', () => {
     })
 
     const worktree = await temporaryDirectory('skillbuddy-backup-tamper-')
-    await git(undefined, ['clone', remote, worktree])
+    await git(undefined, ['clone', '--branch', 'main', remote, worktree])
     await fs.appendFile(join(worktree, 'skills', 'alpha', 'SKILL.md'), '\nTampered\n', 'utf8')
     await git(worktree, ['add', '.'])
     await git(worktree, ['-c', 'user.name=Test', '-c', 'user.email=test@example.com', 'commit', '-m', 'tamper'])

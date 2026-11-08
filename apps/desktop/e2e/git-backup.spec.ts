@@ -91,13 +91,13 @@ test('从设置页备份并恢复 Git 快照', async () => {
       .fill(`git://127.0.0.1:${gitPort}/remote.git`)
     await page.getByPlaceholder('main').fill('devices')
     await page.getByRole('button', { name: '立即备份' }).click()
-    await expect(page.getByText('已备份 1 个 Skill 和 1 个 Preset')).toBeVisible()
+    await expect(page.getByText('已备份 1 个 Skill、1 个 Preset 和 0 条全局 AI 指令')).toBeVisible()
 
     const checkout = join(home, 'checkout')
     await execFileAsync('git', ['clone', '--branch', 'devices', remote, checkout])
     expect(JSON.parse(await fs.readFile(join(checkout, 'skillbuddy-backup.json'), 'utf8'))).toMatchObject({
       kind: 'skillbuddy-backup',
-      version: 1,
+      version: 2,
       presets: [{ name: 'Backup Preset', skills: ['backup-e2e'] }],
     })
 
@@ -111,7 +111,8 @@ test('从设置页备份并恢复 Git 快照', async () => {
     await page.getByRole('button', { name: 'Codex' }).click()
     await page.getByRole('checkbox').first().check()
     await page.getByRole('button', { name: '恢复快照' }).click()
-    await expect(page.getByText('已完成 1 处 Skill 安装')).toBeVisible()
+    await page.getByRole('alertdialog', { name: '恢复 Git 快照' }).getByRole('button', { name: '确认恢复' }).click()
+    await expect(page.getByText('已完成 1 处 Skill 安装和 0 条全局 AI 指令恢复')).toBeVisible()
     await expect.poll(() => fs.readFile(join(skillDirectory, 'SKILL.md'), 'utf8')).toContain(
       '# Original',
     )

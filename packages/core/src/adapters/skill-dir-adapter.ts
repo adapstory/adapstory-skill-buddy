@@ -1,5 +1,6 @@
 import { promises as fs } from 'node:fs'
-import { dirname, join } from 'node:path'
+import { homedir } from 'node:os'
+import { dirname, isAbsolute, join, relative, sep } from 'node:path'
 import matter from 'gray-matter'
 import { resolveResourcePath } from '../resource-path.js'
 import { isLinkParked, parkLink, removeParkedLink, restoreLink } from '../skill-link.js'
@@ -19,6 +20,27 @@ async function entryExists(path: string): Promise<boolean> {
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false
     throw error
+  }
+}
+
+/** Do not replace a managed Git installation with an unrelated platform copy. */
+async function assertNotManagedGitTarget(path: string): Promise<void> {
+  async function existingRealPath(value: string): Promise<string | null> {
+    try {
+      return await fs.realpath(value)
+    } catch (error) {
+      if (error instanceof Error && 'code' in error && error.code === 'ENOENT') return null
+      throw error
+    }
+  }
+  const target = await existingRealPath(path)
+  if (!target) return
+  const codexHome = process.env.CODEX_HOME || join(homedir(), '.codex')
+  const vendor = await existingRealPath(join(codexHome, 'vendor'))
+  if (!vendor) return
+  const within = relative(vendor, target)
+  if (within && within !== '..' && !within.startsWith(`..${sep}`) && !isAbsolute(within)) {
+    throw new Error('Managed Git Skill cannot be replaced by a platform copy')
   }
 }
 
@@ -77,6 +99,7 @@ export abstract class SkillDirAdapter implements AgentAdapter {
     const dir = this.skillsDir(scope, projectRoot)
     if (!dir) throw new Error(`${this.agent}: no skills directory for scope "${scope}"`)
     const skillPath = join(dir, skill.name)
+    await assertNotManagedGitTarget(skillPath)
     await fs.mkdir(dir, { recursive: true })
     const stagingPath = await fs.mkdtemp(join(dir, '.skillbuddy-install-'))
     const backupPath = `${stagingPath}-previous`

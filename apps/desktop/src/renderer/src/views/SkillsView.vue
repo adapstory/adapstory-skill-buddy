@@ -41,6 +41,7 @@ const {
   loading,
   error,
   scanWarnings,
+  scanErrors,
   search,
   driftOnly,
   platformFilter,
@@ -274,6 +275,13 @@ function clearFilters(): void {
         <span> · {{ warning.message }}</span>
       </div>
     </div>
+
+    <details v-if="scanErrors.length" class="mx-6 mt-3 rounded-md border px-3 py-2 text-sm">
+      <summary class="cursor-pointer">{{ t('app.skillScanErrors', { n: scanErrors.length }) }}</summary>
+      <div v-for="issue in scanErrors" :key="`${issue.agent}:${issue.path}:${issue.operation}`" class="break-all pt-1 text-xs">
+        {{ issue.agent }} · {{ issue.path }} · {{ issue.code ?? issue.message }}
+      </div>
+    </details>
 
     <ScrollArea class="flex-1" viewport-class="px-6 py-5">
       <GroupApplyPanel

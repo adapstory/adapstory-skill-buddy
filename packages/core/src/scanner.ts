@@ -3,6 +3,7 @@ import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { allAdapters, allPlatformDefs } from './adapters/index.js'
 import { comparePlatformDisplayName } from './platforms.js'
+import { resolveSkillProvenance } from './provenance.js'
 import { detectPlatformResidue, filterSafeResidueCandidates, platformOwnedRoots } from './platform-residue.js'
 import {
   DISABLED_SKILL_FILE_NAME,
@@ -105,7 +106,29 @@ export async function listPlatformStatus(
   )
 }
 
-async function listDirectories(path: string): Promise<string[]> {
+/** An I/O failure encountered while scanning one root or installation. */
+export interface SkillScanError {
+  agent: AgentId
+  root: string
+  path: string
+  operation: 'read-root' | 'read-link' | 'read-installation'
+  code?: string
+  message: string
+}
+
+function scanError(root: SkillRoot, path: string, operation: SkillScanError['operation'], error: unknown): SkillScanError {
+  return {
+    agent: root.agent,
+    root: root.path,
+    path,
+    operation,
+    code: error instanceof Error && 'code' in error && typeof error.code === 'string' ? error.code : undefined,
+    message: error instanceof Error ? error.message : String(error),
+  }
+}
+
+async function listDirectories(root: SkillRoot, errors: SkillScanError[]): Promise<string[]> {
+  const path = root.path
   try {
     const entries = await fs.readdir(path, { withFileTypes: true })
     const directories: string[] = []
@@ -119,12 +142,13 @@ async function listDirectories(path: string): Promise<string[]> {
       if (!entry.isSymbolicLink()) continue
       try {
         if ((await fs.stat(join(path, entry.name))).isDirectory()) directories.push(entry.name)
-      } catch {
-        // Ignore broken links.
+      } catch (error) {
+        errors.push(scanError(root, join(path, entry.name), 'read-link', error))
       }
     }
     return directories
-  } catch {
+  } catch (error) {
+    errors.push(scanError(root, path, 'read-root', error))
     return []
   }
 }
@@ -217,9 +241,11 @@ async function readLinkMeta(skillPath: string, root: SkillRoot): Promise<LinkMet
 async function scanParkedLinks(
   root: SkillRoot,
   warnings: SkillParseWarning[] = [],
+  errors: SkillScanError[] = [],
 ): Promise<InstalledSkill[]> {
   const skills: InstalledSkill[] = []
-  for (const parked of await listParkedLinks(root.path)) {
+  for (const parked of await listParkedLinks(root.path, (path, error) =>
+    errors.push(scanError(root, path, 'read-link', error)))) {
     const base = {
       agent: root.agent,
       scope: root.scope,
@@ -244,8 +270,10 @@ async function scanParkedLinks(
     }
     let state
     try {
-      state = await readSkillDirState(parked.path, parked.name, (warning) => warnings.push(warning))
-    } catch {
+      state = await readSkillDirState(parked.path, parked.name, (warning) => warnings.push(warning),
+        (path, error) => errors.push(scanError(root, path, 'read-installation', error)))
+    } catch (error) {
+      errors.push(scanError(root, parked.path, 'read-installation', error))
       // 单个损坏或暂时不可读的链接不能阻断同一根目录下的其他 Skill。
       continue
     }
@@ -262,19 +290,23 @@ async function scanParkedLinks(
 export interface ScanInstalledSkillsResult {
   skills: InstalledSkill[]
   warnings: SkillParseWarning[]
+  errors: SkillScanError[]
 }
 
 async function scanSkillRoot(
   root: SkillRoot,
   warnings: SkillParseWarning[] = [],
+  errors: SkillScanError[] = [],
 ): Promise<InstalledSkill[]> {
   const skills: InstalledSkill[] = []
-  for (const name of await listDirectories(root.path)) {
+  for (const name of await listDirectories(root, errors)) {
     const skillPath = join(root.path, name)
     let state
     try {
-      state = await readSkillDirState(skillPath, name, (warning) => warnings.push(warning))
-    } catch {
+      state = await readSkillDirState(skillPath, name, (warning) => warnings.push(warning),
+        (path, error) => errors.push(scanError(root, path, 'read-installation', error)))
+    } catch (error) {
+      errors.push(scanError(root, skillPath, 'read-installation', error))
       // Skill 文件可能来自第三方或外部同步目录；单个异常项应被隔离。
       continue
     }
@@ -304,7 +336,7 @@ async function scanSkillRoot(
       skill: state.skill,
     })
   }
-  skills.push(...(await scanParkedLinks(root, warnings)))
+  skills.push(...(await scanParkedLinks(root, warnings, errors)))
   return skills
 }
 
@@ -323,7 +355,8 @@ export async function scanInstalledSkillsWithWarnings(
 ): Promise<ScanInstalledSkillsResult> {
   const roots = resolvedRoots ?? (await listSkillRoots(projectRoots))
   const warnings: SkillParseWarning[] = []
-  const installations = (await Promise.all(roots.map((root) => scanSkillRoot(root, warnings)))).flat()
+  const errors: SkillScanError[] = []
+  const installations = (await Promise.all(roots.map((root) => scanSkillRoot(root, warnings, errors)))).flat()
   const reconciled: InstalledSkill[] = []
   const registeredAgents = new Set<AgentId>()
   for (const adapter of allAdapters()) {
@@ -338,5 +371,5 @@ export async function scanInstalledSkillsWithWarnings(
   reconciled.push(
     ...installations.filter((installation) => !registeredAgents.has(installation.agent)),
   )
-  return { skills: reconciled, warnings }
+  return { skills: await resolveSkillProvenance(reconciled), warnings, errors }
 }

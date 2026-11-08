@@ -57,6 +57,20 @@ const MESSAGES: Record<TrayLocale, TrayMessages> = {
     settings: 'Settings',
     quit: 'Quit',
   },
+  ru: {
+    title: 'SkillBuddy',
+    normal: 'Всё в порядке',
+    scanning: 'Сканирование',
+    attention: (count) => `Требуют внимания: ${count}`,
+    error: 'Ошибка сканирования — нажмите для повтора',
+    lastChecked: (time) => `Последняя проверка: ${time}`,
+    neverChecked: 'Проверка ещё не выполнена',
+    open: 'Открыть главное окно',
+    refresh: 'Обновить',
+    autoRefresh: 'Автоматическое отслеживание',
+    settings: 'Настройки',
+    quit: 'Выйти',
+  },
 }
 
 const DEFAULT_STATUS: TrayStatus = {
@@ -110,7 +124,7 @@ export class TrayController {
       attentionCount: Math.max(0, Math.floor(status.attentionCount)),
       lastCheckedAt: status.lastCheckedAt,
       autoRefresh: status.autoRefresh,
-      locale: status.locale === 'en' ? 'en' : 'zh-CN',
+      locale: status.locale === 'en' || status.locale === 'ru' ? status.locale : 'zh-CN',
       ...(status.errorMessage ? { errorMessage: status.errorMessage } : {}),
     }
     this.#refresh()

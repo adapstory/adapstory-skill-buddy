@@ -1,5 +1,5 @@
 import { computed, ref, shallowRef, watch } from 'vue'
-import type { AggregatedSkill, PlatformStatus, Skill, SkillParseWarning } from '@skillbuddy/core'
+import type { AggregatedSkill, PlatformStatus, ScanInstalledSkillsResult, Skill, SkillParseWarning } from '@skillbuddy/core'
 import type { InstallTarget, TargetResult } from '#shared/ipc'
 import { i18n } from '../i18n'
 import { matchesSkillInstallation } from '../lib/skill-installations'
@@ -11,6 +11,7 @@ const platforms = shallowRef<PlatformStatus[]>([])
 const loading = ref(false)
 const error = ref<string | null>(null)
 const scanWarnings = shallowRef<SkillParseWarning[]>([])
+const scanErrors = shallowRef<ScanInstalledSkillsResult['errors']>([])
 const lastCheckedAt = shallowRef<number | null>(null)
 
 const search = ref('')
@@ -211,6 +212,7 @@ async function performRefresh(): Promise<void> {
     ])
     skills.value = scanned.skills
     scanWarnings.value = scanned.warnings
+    scanErrors.value = scanned.errors
     platforms.value = platformList
     lastScanStartedAt = scanStartedAt
     lastCheckedAt.value = Date.now()
@@ -328,6 +330,7 @@ export function useSkills() {
     loading,
     error,
     scanWarnings,
+    scanErrors,
     lastCheckedAt,
     search,
     platformFilter,

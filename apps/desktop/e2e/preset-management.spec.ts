@@ -63,6 +63,7 @@ test('管理 Preset 状态、整组启停和可移植 JSON', async () => {
     await expect(page.getByText(/已安装 2\/2 个 Skill/)).toBeVisible()
 
     await page.getByRole('button', { name: '全部禁用' }).click()
+    await page.getByRole('dialog', { name: '禁用技能包' }).getByRole('button', { name: '确认禁用' }).click()
     await expect(page.getByText('已禁用', { exact: true })).toBeVisible()
     await expect.poll(() => fs.stat(join(skillsRoot, 'alpha', 'SKILL.md.disabled')).then(
       () => true,

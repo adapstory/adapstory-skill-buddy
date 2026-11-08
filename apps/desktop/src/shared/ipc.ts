@@ -539,7 +539,7 @@ export interface TrayStatus {
   attentionCount: number
   lastCheckedAt: number | null
   autoRefresh: boolean
-  locale: 'zh-CN' | 'en'
+  locale: 'zh-CN' | 'en' | 'ru'
   errorMessage?: string
 }
 
@@ -701,3 +701,20 @@ export interface McpMarketValidationResult {
   valid: boolean
   error?: string
 }
+
+export interface GitSourceInfo {
+  commit: string
+  upstreamCommit: string
+  upstreamOriginalCommit?: string
+  dirty: boolean
+  diff: string
+  /** Whether this inspection fetched the upstream during this request. */
+  fetched: boolean
+  conflicts: string[]
+  merging: boolean
+}
+
+export type GitSourceOperationResult =
+  | { state: 'conflict'; conflicts: string[] }
+  | { state: 'unchanged' }
+  | { state: 'published'; commit: string; parentCommit: string }

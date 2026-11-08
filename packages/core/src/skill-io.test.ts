@@ -2,7 +2,7 @@ import { promises as fs } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { findSkills, readSkillDir, readSkillFile } from './skill-io.js'
+import { findSkills, readSkillDir, readSkillFile, updateSkillDocument } from './skill-io.js'
 
 let root: string
 
@@ -65,6 +65,14 @@ describe('readSkillDir', () => {
 })
 
 describe('readSkillFile', () => {
+  it('preserves extra frontmatter while applying editor fields', async () => {
+    const original = '---\nname: example\ndescription: Old\ncustom:\n  value: retained\n---\n\nOld body\n'
+    const updated = updateSkillDocument(original, { description: 'New', version: '2', tags: ['one'], content: 'New body' })
+    await fs.writeFile(join(root, 'SKILL.md'), updated)
+    const skill = await readSkillFile(join(root, 'SKILL.md'))
+    expect(skill).toMatchObject({ name: 'example', description: 'New', version: '2', tags: ['one'], content: 'New body', metadata: { custom: { value: 'retained' } } })
+    expect(updateSkillDocument(updated, { description: 'New', version: '2', tags: ['one'], content: 'New body' })).toBe(updated)
+  })
   it('reads only the selected SKILL.md without sibling resources', async () => {
     const dir = join(root, 'standalone')
     await writeSkill(dir, 'standalone')

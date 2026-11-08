@@ -2,8 +2,11 @@ import { readdirSync, readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
+import { createI18n } from 'vue-i18n'
 import en from './en'
 import zhCN from './zh-CN'
+import ruCore from './ru-core'
+import ruRest from './ru-rest'
 import { MCP_SO_CATEGORY_KEYS, MODELSCOPE_CATEGORY_KEYS } from '@/lib/mcp-market'
 import { PLATFORM_DRAFT_ERROR_KEYS } from '@/lib/platform-draft'
 
@@ -13,6 +16,16 @@ function flattenKeys(value: unknown, prefix = '', result = new Set<string>()): S
     const path = prefix ? `${prefix}.${key}` : key
     result.add(path)
     flattenKeys(child, path, result)
+  }
+  return result
+}
+
+function messages(value: unknown, prefix = '', result = new Map<string, string>()): Map<string, string> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return result
+  for (const [key, child] of Object.entries(value)) {
+    const path = prefix ? `${prefix}.${key}` : key
+    if (typeof child === 'string') result.set(path, child)
+    else messages(child, path, result)
   }
   return result
 }
@@ -85,6 +98,28 @@ function dynamicTranslationKeys(): string[] {
 describe('renderer locale completeness', () => {
   const zhKeys = flattenKeys(zhCN)
   const enKeys = flattenKeys(en)
+  const ruKeys = flattenKeys({ ...ruCore, ...ruRest })
+
+  it('provides Russian messages for every English key', () => {
+    expect([...enKeys].filter((key) => !ruKeys.has(key))).toEqual([])
+    expect([...ruKeys].filter((key) => !enKeys.has(key))).toEqual([])
+  })
+
+  it('renders Russian messages with the same named parameters', () => {
+    const english = messages(en)
+    const russian = messages({ ...ruCore, ...ruRest })
+    const translator = createI18n({ legacy: false, locale: 'ru', messages: { ru: { ...ruCore, ...ruRest } } })
+    for (const [key, original] of english) {
+      const translated = russian.get(key)
+      expect(translated, key).toBeDefined()
+      if (translated === undefined) continue
+      const parameters = (text: string) => [...text.matchAll(/\{([A-Za-z_]\w*)\}/g)].map((match) => match[1]).sort()
+      const names = parameters(original)
+      expect(parameters(translated), key).toEqual(names)
+      const values = Object.fromEntries(names.map((name) => [name, 'test']))
+      expect(() => translator.global.t(key, values)).not.toThrow()
+    }
+  })
 
   it('keeps Chinese and English locale key trees aligned', () => {
     expect([...zhKeys].filter((key) => !enKeys.has(key))).toEqual([])

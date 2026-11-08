@@ -175,9 +175,11 @@ watch(
 watch(sidebarCollapsed, (v) => localStorage.setItem('skm.sidebarCollapsed', JSON.stringify(v)))
 
 i18n.global.locale.value = language.value
+document.documentElement.lang = language.value
 watch(language, (v) => {
   localStorage.setItem('skm.language', JSON.stringify(v))
   i18n.global.locale.value = v
+  document.documentElement.lang = v
 })
 
 watch(projectRoots, (v) => localStorage.setItem('skm.projectRoots', JSON.stringify(v)), {

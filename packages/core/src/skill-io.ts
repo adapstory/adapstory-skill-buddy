@@ -8,6 +8,20 @@ import { exists } from './adapters/shared.js'
 export const SKILL_FILE_NAME = 'SKILL.md'
 export const DISABLED_SKILL_FILE_NAME = 'SKILL.md.disabled'
 
+/** Apply editor fields while retaining every other frontmatter field. */
+export function updateSkillDocument(raw: string, edit: Pick<Skill, 'description' | 'version' | 'tags' | 'content'>): string {
+  const parsed = matter(raw)
+  const oldTags = Array.isArray(parsed.data.tags) ? parsed.data.tags.filter((tag: unknown) => typeof tag === 'string') : []
+  if ((parsed.data.description ?? '') === edit.description && (parsed.data.version || undefined) === (edit.version || undefined) &&
+      JSON.stringify(oldTags) === JSON.stringify(edit.tags ?? []) && parsed.content.trim() === edit.content.trim()) return raw
+  const metadata: Record<string, unknown> = { ...parsed.data, description: edit.description }
+  if (edit.version) metadata.version = edit.version
+  else delete metadata.version
+  if (edit.tags?.length) metadata.tags = edit.tags
+  else delete metadata.tags
+  return matter.stringify(`\n${edit.content}\n`, metadata)
+}
+
 export interface SkillFileState {
   skill: Skill
   enabled: boolean
@@ -18,6 +32,11 @@ export interface SkillFileState {
 export type { SkillParseWarning }
 
 type ParseWarningHandler = (warning: SkillParseWarning) => void
+type ReadErrorHandler = (path: string, error: unknown) => void
+
+function isMissing(error: unknown): boolean {
+  return error instanceof Error && 'code' in error && error.code === 'ENOENT'
+}
 
 function parseMatter(
   raw: string,
@@ -57,8 +76,12 @@ async function readSkillFileState(
   fallbackName?: string,
   onWarning?: ParseWarningHandler,
   includeResources = true,
+  onReadError?: ReadErrorHandler,
 ): Promise<SkillFileRead | null> {
-  const raw = await fs.readFile(filePath, 'utf8').catch(() => null)
+  const raw = await fs.readFile(filePath, 'utf8').catch((error: unknown) => {
+    onReadError?.(filePath, error)
+    return null
+  })
   if (raw === null) return null
   let parseError: SkillParseWarning | undefined
   const parsed = parseMatter(raw, filePath, (warning) => {
@@ -76,7 +99,7 @@ async function readSkillFileState(
       version: typeof data.version === 'string' ? data.version : undefined,
       tags: Array.isArray(data.tags) ? data.tags.filter((t) => typeof t === 'string') : undefined,
       content,
-      resources: includeResources ? await collectResources(skillPath) : undefined,
+      resources: includeResources ? await collectResources(skillPath, onReadError) : undefined,
       metadata: data,
     },
   }
@@ -128,16 +151,28 @@ export async function readSkillDirState(
   skillPath: string,
   fallbackName?: string,
   onWarning?: ParseWarningHandler,
+  onReadError?: ReadErrorHandler,
 ): Promise<SkillFileState | null> {
   const activePath = join(skillPath, SKILL_FILE_NAME)
   const disabledPath = join(skillPath, DISABLED_SKILL_FILE_NAME)
-  const enabled = await exists(activePath)
-  if (!enabled && !(await exists(disabledPath))) return null
+  async function present(path: string): Promise<boolean> {
+    try {
+      await fs.stat(path)
+      return true
+    } catch (error) {
+      if (!isMissing(error)) onReadError?.(path, error)
+      return false
+    }
+  }
+  const enabled = await present(activePath)
+  if (!enabled && !(await present(disabledPath))) return null
   const read = await readSkillFileState(
     skillPath,
     enabled ? activePath : disabledPath,
     fallbackName,
     onWarning,
+    true,
+    onReadError,
   )
   if (!read) return null
   return { enabled, skill: read.skill, parseError: read.parseError }
@@ -146,10 +181,18 @@ export async function readSkillDirState(
 /** Walk a skill directory and collect non-SKILL.md files as resources. */
 export async function collectResources(
   skillPath: string,
+  onReadError?: ReadErrorHandler,
 ): Promise<Record<string, string> | undefined> {
   const resources: Record<string, string> = {}
   async function walk(dir: string, prefix: string): Promise<void> {
-    const entries = await fs.readdir(dir, { withFileTypes: true })
+    let entries
+    try {
+      entries = await fs.readdir(dir, { withFileTypes: true })
+    } catch (error) {
+      if (!onReadError) throw error
+      onReadError(dir, error)
+      return
+    }
     for (const entry of entries) {
       const rel = prefix ? `${prefix}/${entry.name}` : entry.name
       if (entry.isDirectory()) {
